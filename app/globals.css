@@ -1,26 +1,238 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #05070c;
+  --surface: #0a0e16;
+  --border: #182030;
+  --foreground: #eef3f8;
+  --muted: #8d99ab;
+  --accent: #22d3ee;
+  --accent-2: #8b7bff; /* violet, from the rim light */
+  --accent-3: #ff4f8b; /* the previous site's pink, used only inside gradients */
+  --screen: #0b1220; /* the laptop screen colour; the story fades into it */
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-accent-2: var(--accent-2);
+  --color-accent-3: var(--accent-3);
+  --color-screen: var(--screen);
+  --font-sans: var(--font-body);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-code);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+  /* scrolling stays, the scrollbar itself is hidden */
+  scrollbar-width: none;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+::selection {
+  background: rgb(34 211 238 / 0.35);
+}
+
+/* ---------------------------------------------------------------- building blocks */
+
+/* cyan -> violet -> pink, like the previous site's theme gradient */
+.grad-text {
+  background: linear-gradient(100deg, var(--accent) 0%, var(--accent-2) 55%, var(--accent-3) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* outlined display type */
+.text-outline {
+  color: transparent;
+  -webkit-text-stroke: 1.5px rgb(238 243 248 / 0.55);
+}
+.text-outline-accent {
+  color: transparent;
+  -webkit-text-stroke: 1.5px var(--accent);
+}
+
+/* frosted panel with a hairline gradient border */
+.glass {
+  position: relative;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.045), rgb(255 255 255 / 0.015));
+  border: 1px solid rgb(255 255 255 / 0.07);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.glow-border {
+  position: relative;
+  isolation: isolate;
+}
+.glow-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1px;
+  border-radius: inherit;
+  background: linear-gradient(140deg, rgb(34 211 238 / 0.55), rgb(139 123 255 / 0.15) 40%, transparent 60%, rgb(255 79 139 / 0.35));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0.35;
+  transition: opacity 0.4s ease;
+}
+.glow-border:hover::before {
+  opacity: 1;
+}
+
+/* pill buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  border-radius: 9999px;
+  padding: 0.85rem 1.6rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, background-color 0.25s ease, color 0.25s ease;
+}
+.btn:hover {
+  transform: translateY(-2px);
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--background);
+  box-shadow: 0 0 0 0 rgb(34 211 238 / 0.5);
+}
+.btn-primary:hover {
+  box-shadow: 0 10px 40px -8px rgb(34 211 238 / 0.65);
+}
+.btn-ghost {
+  border: 1px solid rgb(255 255 255 / 0.16);
+  color: var(--foreground);
+}
+.btn-ghost:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* banner text powering on like a neon tube: a few unsteady flickers, then it holds */
+.flicker-in {
+  animation: flicker-in 1.5s linear both;
+}
+@keyframes flicker-in {
+  0% { opacity: 0; text-shadow: none; }
+  6% { opacity: 0.9; }
+  9% { opacity: 0.08; }
+  15% { opacity: 0.75; text-shadow: 0 0 18px rgb(34 211 238 / 0.65); }
+  18% { opacity: 0.15; }
+  27% { opacity: 1; }
+  31% { opacity: 0.35; }
+  38% { opacity: 1; text-shadow: 0 0 22px rgb(34 211 238 / 0.55); }
+  100% { opacity: 1; text-shadow: 0 0 14px rgb(34 211 238 / 0.18); }
+}
+
+/* blinking caret after the rotating role */
+.caret::after {
+  content: "";
+  display: inline-block;
+  width: 0.08em;
+  height: 0.9em;
+  margin-left: 0.12em;
+  vertical-align: -0.08em;
+  background: var(--accent);
+  animation: caret 1s steps(1) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}
+
+/* the nav and rail wait for the intro to finish */
+.after-intro {
+  opacity: 0;
+  transition: opacity 0.8s ease;
+}
+html[data-intro="done"] .after-intro {
+  opacity: 1;
+}
+
+/* scroll reveals: hidden only once JS is ready to show them again (see ScrollFx) */
+html.fx [data-reveal],
+html.fx [data-stagger] > * {
+  opacity: 0;
+}
+
+/* soft film grain over the whole page */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  pointer-events: none;
+  z-index: 60;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* slow marquee for the big outline words */
+.marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 38s linear infinite;
+}
+@keyframes marquee {
+  to { transform: translateX(-50%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  .flicker-in, .marquee, .caret::after { animation: none; }
+  .after-intro { opacity: 1; transition: none; }
+  html.fx [data-reveal],
+  html.fx [data-stagger] > * { opacity: 1; }
+}
+
+/* the Work section starts underneath the story's last screen; its live laptop page shows once it reaches the top */
+.work-in-laptop {
+  margin-top: -100svh;
+}
+.work-in-laptop:not([data-live]) .laptop-live {
+  visibility: hidden;
+}
+/* inside the laptop the page is the laptop: the site's own nav and rail step aside */
+html[data-inside] .after-intro {
+  opacity: 0;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-in-laptop { margin-top: 0; }
+  .work-in-laptop:not([data-live]) .laptop-live { visibility: visible; }
+}
+
+/* the Send button catches a paper plane */
+.landed {
+  animation: landed 0.9s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes landed {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgb(34 211 238 / 0.7); }
+  25% { transform: scale(1.08) rotate(-2deg); }
+  55% { transform: scale(0.97); }
+  100% { transform: scale(1); box-shadow: 0 0 0 18px rgb(34 211 238 / 0); }
+}
+
