@@ -119,7 +119,9 @@ function buildRig(gltf: GLTF) {
   const n = screenMesh.geometry.getAttribute("normal");
   const screenNormalLocal = new THREE.Vector3(n.getX(0), n.getY(0), n.getZ(0)).normalize();
   // lives in the root scene (not the model), because the model itself is moved around in act 2
-  const faceLight = new THREE.RectAreaLight(0xcfeaff, 0, 0.3, 0.19);
+  // dual-colour screen light: the left and right halves of the screen each throw their own colour
+  const faceLight = new THREE.RectAreaLight(0xcfeaff, 0, 0.15, 0.19);
+  const faceLight2 = new THREE.RectAreaLight(0xcfeaff, 0, 0.15, 0.19);
 
   // material polish toward a Pixar look: skin with a warm sheen at grazing angles (a cheap stand-in for light
   // scattering through skin), soft velvety cloth, glossy eyes. Lenses hidden: glass reads as a white disc in real time.
@@ -128,7 +130,8 @@ function buildRig(gltf: GLTF) {
     THREE.MeshStandardMaterial.prototype.copy.call(p, m);
     return p;
   };
-  const SKIN = /^(Material(.001)?|hand Material)$/;
+  const SKIN = /^(Material(.001)?|hand Material|Mouth_Skin|Lip)$/;
+  const keyGlow: THREE.MeshStandardMaterial[] = [];
   scene.traverse((o) => {
     if ((o as THREE.SkinnedMesh).isSkinnedMesh) o.frustumCulled = false; // bind-pose bounds don't follow the animation
     const mesh = o as THREE.Mesh;
@@ -136,11 +139,11 @@ function buildRig(gltf: GLTF) {
     if (!m || !m.name) return;
     if (m.name === "Glasses_Lens") { o.visible = false; return; }
     if (m.name === "Laptop_Logo") m.emissiveIntensity = 2.2;
-    if (m.name === "Laptop_KeyGlow") m.emissiveIntensity = 0.8;
+    if (m.name === "Laptop_KeyGlow") { m.emissiveIntensity = 0.8; keyGlow.push(m); }
     if (/^(Laptop_|Glasses_Metal|Teeth|Cap_Logo)/.test(m.name) || mesh.name.startsWith("Laptop")) return;
     const p = physical(m);
     p.metalness = 0; p.metalnessMap = null;
-    if (m.name === "EyesMaterial") { // wet, glossy eyes
+    if (m.name === "EyesMaterial" || m.name === "Eye_Sclera") { // wet, glossy eyes
       p.roughness = 0.15; p.clearcoat = 1; p.clearcoatRoughness = 0.06;
     } else if (SKIN.test(m.name)) {
       p.roughness = 0.52; p.envMapIntensity = 0.65;
@@ -172,15 +175,12 @@ function buildRig(gltf: GLTF) {
   const head = get("spine006"), neck = get("spine005"), spine = get("spine003");
   const handR = get("handR");
   scene.updateMatrixWorld(true);
-  const eyeBox = new THREE.Box3().setFromObject(get("EYEs001"));
-  const eyeL = new THREE.Object3D(), eyeR = new THREE.Object3D();
-  for (const [e, x] of [[eyeL, eyeBox.max.x * 0.6], [eyeR, eyeBox.min.x * 0.6]] as const) {
-    head.attach(e); e.position.copy(head.worldToLocal(new THREE.Vector3(x, (eyeBox.min.y + eyeBox.max.y) / 2, eyeBox.max.z)));
-  }
+  // the two eyeballs are separate objects on the head, each pivoting on its own centre, so the pupils really turn
+  const eyeL = get("EyeL"), eyeR = get("EyeR");
   return {
-    scene, mixer, storyA, storyRA, storyRFA, introArmA, introA, typingA, walkA, pointA, callA, carryA, typeA, screen, screenMesh, screenMat, faceLight,
+    scene, mixer, storyA, storyRA, storyRFA, introArmA, introA, typingA, walkA, pointA, callA, carryA, typeA, screen, screenMesh, screenMat, faceLight, faceLight2,
     screenCenterLocal, screenNormalLocal, screenCorners, logo, logoCenterLocal,
-    head, neck, eyeL, eyeR, spine, handR,
+    head, neck, eyeL, eyeR, spine, handR, keyGlow,
     eyeLQ: eyeL.quaternion.clone(), eyeRQ: eyeR.quaternion.clone(),
     // The mixer only writes a property when its animated value changes, so anything we adjust on top
     // (head look, breathing) must be reset to the last clean animated value before each update,
@@ -191,6 +191,7 @@ function buildRig(gltf: GLTF) {
     camPos: get("Cam_Pos"), camTarget: get("Cam_Target"),
     blinkTargets, nextBlink: 1.5,
     look: { x: 0, y: 0 },
+    eyeLook: { x: 0, y: 0 },
     walk: { phase: 0, lastX: -3.8, weight: 0 },
     pose: { x: -3.8, yaw: Math.PI / 2, type: 0, lid: 0, point: 0, call: 0 } as Act2Pose,
     lastLid: 0,
@@ -203,6 +204,30 @@ const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3
 const v5 = new THREE.Vector3(), v6 = new THREE.Vector3(), v7 = new THREE.Vector3(), v8 = new THREE.Vector3();
 const v9 = new THREE.Vector3(), v10 = new THREE.Vector3();
 const q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), q3 = new THREE.Quaternion(), e1 = new THREE.Euler(0, 0, 0, "YXZ");
+
+// ---------------------------------------------------------------- the "video" playing on the laptop
+const WHITE = new THREE.Color(1, 1, 1), FACE_BASE = new THREE.Color(0xcfeaff), KEY_BASE = new THREE.Color(0x22d3ee);
+const vidCol = new THREE.Color(), vidMix = new THREE.Color(), vidA = new THREE.Color(), vidB = new THREE.Color();
+const SHOTS = ["#22d3ee", "#8b7bff", "#ff4fa3", "#ffb347", "#2ee6a8", "#4f8bff", "#ff6b6b", "#c7f0ff"].map((c) => new THREE.Color(c));
+// two colours at once (left / right of the screen): complementary pairs
+const PAIRS: [number, number][] = [[0, 2], [1, 3], [5, 2], [4, 1], [0, 6], [3, 5], [2, 4], [1, 0]];
+const vidC = new THREE.Color(), vidD = new THREE.Color(), vidCol2 = new THREE.Color();
+const hash = (n: number) => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
+/** colour + brightness of the screen's light at time t: shots of 0.9-2.3 s with soft 0.3 s cuts, plus a little motion flicker */
+function videoLight(t: number, out: THREE.Color) {
+  let start = 0, i = 0;
+  for (;;) { const len = 0.9 + 1.4 * hash(i + 1); if (start + len > t % 600) break; start += len; i++; }
+  const local = (t % 600) - start;
+  const pa = PAIRS[Math.floor(hash(i + 7) * PAIRS.length)], pb = PAIRS[Math.floor(hash(i + 6) * PAIRS.length)];
+  vidA.copy(SHOTS[pa[0]]); vidC.copy(SHOTS[pa[1]]);
+  vidB.copy(SHOTS[pb[0]]); vidD.copy(SHOTS[pb[1]]);
+  const cut = Math.min(1, local / 0.3), c = cut * cut * (3 - 2 * cut);
+  out.copy(vidB).lerp(vidA, c);
+  vidCol2.copy(vidD).lerp(vidC, c);
+  const lvl = THREE.MathUtils.lerp(0.75 + 0.5 * hash(i + 3 - 1), 0.75 + 0.5 * hash(i + 3), c);
+  const flicker = 1 + 0.06 * Math.sin(t * 13.1 + i) + 0.04 * Math.sin(t * 31.7);
+  return { color: out, color2: vidCol2, level: lvl * flicker };
+}
 
 /** rotate a bone by a world-space rotation on top of its clean local pose (bone axes in the CC rig are arbitrary) */
 function rotateWorld(bone: THREE.Object3D, clean: THREE.Quaternion, world: THREE.Quaternion) {
@@ -222,11 +247,11 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
   useEffect(() => {
     const r = buildRig(gltf);
     rig.current = r;
-    getThree().scene.add(r.faceLight);
+    getThree().scene.add(r.faceLight, r.faceLight2);
     // test builds only: expose the scene to the screenshot scripts
     if (process.env.NEXT_PUBLIC_SHOTS === "1") Object.assign(window, { __story: story, __three: getThree, __rig: r });
     onReady();
-    return () => { r.mixer.stopAllAction(); r.screen.dispose(); r.screenMat.dispose(); r.faceLight.removeFromParent(); };
+    return () => { r.mixer.stopAllAction(); r.screen.dispose(); r.screenMat.dispose(); r.faceLight.removeFromParent(); r.faceLight2.removeFromParent(); };
   }, [gltf, onReady, getThree]);
 
   // stop rendering entirely while the story is scrolled out of view
@@ -348,7 +373,14 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
     rotateWorld(r.head, r.headClean, share(0.5));
     r.head.scale.setScalar(1.06); // Pixar proportions: a slightly bigger head (cap, glasses and beard ride along)
     r.head.updateMatrixWorld(true);
-    q1.setFromEuler(e1.set(-pitch * 0.6, yaw * 0.6, 0));
+    // the eyes lead: they dart to the cursor first (fast), the head catches up (slow); the eyes then rest a little
+    // ahead of the head. Their extra turn is the gap between the two, soft-limited so the pupils never leave the eye.
+    const ke = 1 - Math.pow(1 - 0.22, dt * 60);
+    r.eyeLook.x += ((follow ? pointer.x * lookWeight : 0) - r.eyeLook.x) * ke;
+    r.eyeLook.y += ((follow ? pointer.y * lookWeight : 0) - r.eyeLook.y) * ke;
+    const eyeYaw = Math.tanh(((r.eyeLook.x - r.look.x) * 1.6 + r.look.x * 0.35) * 1.1) * 24 * DEG;
+    const eyePitch = Math.tanh(((r.eyeLook.y - r.look.y) * 1.6 + r.look.y * 0.35) * 1.1) * 14 * DEG;
+    q1.setFromEuler(e1.set(-eyePitch, eyeYaw, 0));
     rotateWorld(r.eyeL, r.eyeLQ, q1);
     rotateWorld(r.eyeR, r.eyeRQ, q1);
     r.scene.updateMatrixWorld();
@@ -417,14 +449,27 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
     const screenMode = act2 ? (r.showChat ? "contact" : "code") : p > SCREEN_SWAP ? "work" : "code";
     if (r.screen.update(t, screenMode) && planes.active) planes.launch = true;
     const power = screenOn * (1 - (1 - story.lock) * (0.03 - 0.03 * Math.sin(t * 50))); // faint refresh shimmer, gone once locked
-    r.screenMat.color.setScalar(power);
+    // "a video is playing": the screen's light cuts between coloured shots (tinting his face, the keyboard backlight and
+    // the screen itself), neutral again once the camera locks onto the screen so the hand-over still matches the page
+    const vid = videoLight(t, vidCol);
+    const tint = (1 - story.lock) * (screenMode === "work" ? 0.25 : 1);
+    vidMix.copy(vid.color).lerp(vid.color2, 0.5);
+    for (const m of r.keyGlow) m.emissive.copy(KEY_BASE).lerp(vidMix, 0.85 * tint);
+    vidMix.copy(WHITE).lerp(vidMix, 0.22 * tint);
+    r.screenMat.color.copy(vidMix).multiplyScalar(power);
+    r.faceLight.color.copy(FACE_BASE).lerp(vid.color, 0.9 * tint);
+    r.faceLight2.color.copy(FACE_BASE).lerp(vid.color2, 0.9 * tint);
     r.screenMesh.localToWorld(v1.copy(r.screenCenterLocal));
     v3.copy(r.screenNormalLocal).transformDirection(r.screenMesh.matrixWorld);
-    r.faceLight.position.copy(v1).addScaledVector(v3, 0.02);
+    // the two halves of the screen: offset along the screen's own width
+    v6.set(1, 0, 0).transformDirection(r.screenMesh.matrixWorld);
+    r.faceLight.position.copy(v1).addScaledVector(v3, 0.02).addScaledVector(v6, -0.075);
+    r.faceLight2.position.copy(v1).addScaledVector(v3, 0.02).addScaledVector(v6, 0.075);
     fountain.origin.copy(v1).addScaledVector(v3, 0.06).y += 0.12;
     planes.origin.copy(v1).addScaledVector(v3, 0.05); // out of the screen
-    r.faceLight.lookAt(v4.copy(v1).add(v3));
-    r.faceLight.intensity = 9 * power * faceLit;
+    r.faceLight.lookAt(v4.copy(r.faceLight.position).add(v3));
+    r.faceLight2.lookAt(v4.copy(r.faceLight2.position).add(v3));
+    r.faceLight.intensity = r.faceLight2.intensity = 7 * power * faceLit * (1 + (vid.level - 1) * tint);
 
     // ---- focus: logo -> face during the intro, face while reading, then the screen as we dive in; sharp in act 2
     r.logo.localToWorld(v2.copy(r.logoCenterLocal));
