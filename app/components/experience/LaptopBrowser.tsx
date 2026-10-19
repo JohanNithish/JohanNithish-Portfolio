@@ -84,7 +84,7 @@ const LaptopBrowser = forwardRef<HTMLDivElement, Props>(function LaptopBrowser({
           className="absolute inset-0 flex items-end justify-center bg-transparent pb-6"
           aria-label={`Interact with ${project.title}`}
         >
-          <span className="rounded-full bg-[#0b1220]/85 px-4 py-2 font-mono text-[11px] tracking-[0.15em] text-white/85 uppercase shadow-lg backdrop-blur">
+          <span className="rounded-full bg-[#0b1220]/90 px-4 py-2 font-mono text-[11px] tracking-[0.15em] text-white/85 uppercase shadow-lg">
             {loaded ? "Click to use the site · scroll to keep going" : "Loading live site…"}
           </span>
         </button>
@@ -214,7 +214,7 @@ const LaptopBrowser = forwardRef<HTMLDivElement, Props>(function LaptopBrowser({
                       target="_blank"
                       rel="noreferrer"
                       aria-label={`Open ${p.title} in a new tab`}
-                      className="absolute top-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-[#0b1220]/80 text-white opacity-0 backdrop-blur transition group-hover:opacity-100 hover:bg-accent hover:text-[#0b1220] focus-visible:opacity-100"
+                      className="absolute top-3 right-3 grid h-9 w-9 place-items-center rounded-full bg-[#0b1220]/90 text-white opacity-0 transition group-hover:opacity-100 hover:bg-accent hover:text-[#0b1220] focus-visible:opacity-100"
                     >
                       <ArrowUpRight className="h-4 w-4" />
                     </a>

@@ -14,7 +14,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable} h-full antialiased`}>
+    // suppressHydrationWarning: the loader's inline script sets --load / data-loaded on <html> before React starts
+    // (this element's own attributes only; mismatches anywhere else are still reported)
+    <html lang="en" suppressHydrationWarning className={`${display.variable} ${body.variable} ${mono.variable} h-full antialiased`}>
       <body className="grain min-h-full flex flex-col font-sans">{children}</body>
     </html>
   );

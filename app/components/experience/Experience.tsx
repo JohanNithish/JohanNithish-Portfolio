@@ -10,7 +10,7 @@ import { about, profile, stats } from "../../data";
 import RoleTicker from "../RoleTicker";
 import { REDUCED_MOTION, TOUCH, useMediaQuery } from "../useMediaQuery";
 import LaptopBrowser from "./LaptopBrowser";
-import { smooth, story } from "./story";
+import { smooth, story, throughGlass } from "./story";
 
 gsap.registerPlugin(ScrollTrigger, RoughEase, useGSAP);
 // keep the intro on real time even when a slow device drops frames (otherwise GSAP stretches it out)
@@ -27,31 +27,95 @@ const SHOT: number | null =
     ? Number(new URLSearchParams(window.location.search).get("shot"))
     : null;
 
-function LaptopLoader({ pct }: { pct: number }) {
+const LOADER_STEPS: [number, string][] = [[0, "Booting laptop"], [30, "Loading the 3D character"], [65, "Compiling ideas"], [92, "Polishing pixels"], [100, "Ready"]];
+
+/** Runs straight from the HTML, before the app's JavaScript has even downloaded: streams the 3D model and drives the
+ *  loader through the --load CSS variable (0..1) plus the number / status text. React only tops it up later
+ *  (window.__setLoad). The finished download is handed to the 3D scene as a blob URL (window.__model), so the model
+ *  is downloaded once. */
+const loaderScript = (bytes: number) => `(function(){var max=0,S=${JSON.stringify(LOADER_STEPS)};
+window.__setLoad=function(p){p=Math.max(max,Math.min(100,p||0));max=p;var r=document.documentElement;r.style.setProperty('--load',String(p/100));
+var a=document.getElementById('ld-pct');var q=Math.round(p);if(a)a.textContent=(q<10?'0':'')+q;
+var t='';for(var i=0;i<S.length;i++)if(p>=S[i][0])t=S[i][1];var s=document.getElementById('ld-status');if(s)s.textContent=t;
+if(p>=100)r.setAttribute('data-loaded','');};
+var done;window.__model=new Promise(function(r){done=r;});
+try{fetch('/models/hero.glb',{mode:'cors',credentials:'same-origin'}).then(function(res){var n=${bytes}||+res.headers.get('content-length');if(!res.body||!n)return;
+var rd=res.body.getReader(),got=0,parts=[];(function pump(){rd.read().then(function(x){if(x.done){done(URL.createObjectURL(new Blob(parts)));return;}parts.push(x.value);got+=x.value.byteLength;window.__setLoad(got/n*92);pump();}).catch(function(){done(null);});})();}).catch(function(){done(null);});}catch(e){done(null);}})();`;
+
+/** The closed laptop, waiting to open: its </> logo is the progress bar (it charges up from the bottom), the power
+ *  light pulses on the front edge, and the status line follows the real download. Everything that moves reads the
+ *  --load variable, so it works before the app has started. */
+function LaptopLoader({ modelBytes }: { modelBytes: number }) {
+  const load = "var(--load, 0)";
   return (
-    <div className="flex flex-col items-center gap-8">
-      {/* a closed laptop, lid glowing faintly */}
-      <svg viewBox="0 0 220 60" className="w-56" aria-hidden>
+    <div className="flex flex-col items-center gap-9">
+      <svg viewBox="0 0 320 200" className="w-[min(78vw,360px)] overflow-visible" aria-hidden>
         <defs>
-          <linearGradient id="lid" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor="#3b414d" />
-            <stop offset="1" stopColor="#23272f" />
+          <linearGradient id="ld-lid" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="#2b313c" />
+            <stop offset="1" stopColor="#171b22" />
           </linearGradient>
+          <linearGradient id="ld-base" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="#4a505c" />
+            <stop offset="1" stopColor="#2a2f38" />
+          </linearGradient>
+          <linearGradient id="ld-sheen" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stopColor="#ffffff" stopOpacity="0.09" />
+            <stop offset="0.45" stopColor="#ffffff" stopOpacity="0" />
+          </linearGradient>
+          <radialGradient id="ld-floor">
+            <stop offset="0" stopColor="#22d3ee" stopOpacity="0.4" />
+            <stop offset="1" stopColor="#22d3ee" stopOpacity="0" />
+          </radialGradient>
+          {/* the logo glyph spans y 86..128: the clip grows up from the bottom with --load */}
+          <clipPath id="ld-fill">
+            <rect x="0" y="86" width="320" height="44" style={{ transformBox: "view-box", transformOrigin: "0 130px", transform: `scaleY(${load})`, transition: "transform .35s ease-out" }} />
+          </clipPath>
+          <filter id="ld-glow" x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="3.5" result="b" />
+            <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
         </defs>
-        <rect x="20" y="22" width="180" height="10" rx="3" fill="url(#lid)" />
-        <rect x="8" y="32" width="204" height="9" rx="4" fill="#4b505b" />
-        <rect x="88" y="41" width="44" height="3" rx="1.5" fill="#2c3038" />
-        <text x="110" y="30.5" textAnchor="middle" fontFamily="ui-monospace, monospace" fontSize="8" fill="#22d3ee" className="animate-pulse">&lt;/&gt;</text>
+
+        <ellipse cx="160" cy="176" rx="150" ry="16" fill="url(#ld-floor)" style={{ opacity: `calc(0.35 + 0.65 * ${load})`, transition: "opacity .35s" }} />
+        {/* lid (closed, seen from the front and a little above) */}
+        <polygon points="56,58 264,58 290,150 30,150" fill="url(#ld-lid)" stroke="#3a414d" strokeWidth="1" />
+        <polygon points="56,58 264,58 290,150 30,150" fill="url(#ld-sheen)" />
+        {/* base slab and front edge */}
+        <polygon points="30,150 290,150 298,161 22,161" fill="url(#ld-base)" />
+        <rect x="22" y="161" width="276" height="3" rx="1.5" fill="#1f232b" />
+        <path d="M138 161 q22 6 44 0" fill="none" stroke="#1a1d24" strokeWidth="2" />
+        {/* glowing seam between lid and base: brighter as it charges */}
+        <line x1="31" y1="150" x2="289" y2="150" stroke="#22d3ee" strokeWidth="1.2" style={{ strokeOpacity: `calc(0.15 + 0.6 * ${load})`, transition: "stroke-opacity .35s" }} />
+
+        {/* the logo is the progress bar: dim outline, cyan fill rising from the bottom */}
+        <text x="160" y="124" textAnchor="middle" fontFamily="var(--font-code), ui-monospace, monospace" fontSize="44" fontWeight="700"
+          fill="none" stroke="#22d3ee" strokeOpacity="0.28" strokeWidth="1.2">&lt;/&gt;</text>
+        <g clipPath="url(#ld-fill)" filter="url(#ld-glow)">
+          <text x="160" y="124" textAnchor="middle" fontFamily="var(--font-code), ui-monospace, monospace" fontSize="44" fontWeight="700" fill="#22d3ee">&lt;/&gt;</text>
+        </g>
+        {/* the fill's surface, like liquid */}
+        <line x1="118" x2="202" y1="130" y2="130" stroke="#a5f3fc" strokeWidth="1" className="ld-surface animate-pulse"
+          style={{ transform: `translateY(calc(${load} * -44px))`, transition: "transform .35s ease-out" }} />
+
+        {/* power light */}
+        <circle cx="160" cy="157" r="2.2" fill="#22d3ee" className="ld-led animate-pulse" filter="url(#ld-glow)" />
       </svg>
-      <div className="w-56">
-        <div className="h-px w-full bg-white/10">
-          <div className="h-px bg-gradient-to-r from-accent to-accent-2 shadow-[0_0_10px_#22d3ee] transition-[width] duration-300" style={{ width: `${Math.max(4, pct)}%` }} />
+
+      <div className="flex w-[min(78vw,300px)] flex-col items-center gap-3">
+        <p className="font-mono text-3xl font-semibold tabular-nums text-white">
+          <span id="ld-pct" suppressHydrationWarning>00</span><span className="text-accent">%</span>
+        </p>
+        <div className="h-px w-full overflow-hidden bg-white/10">
+          <div className="h-px bg-gradient-to-r from-accent to-accent-2 shadow-[0_0_10px_#22d3ee]"
+            style={{ width: `max(3%, calc(${load} * 100%))`, transition: "width .35s ease-out" }} />
         </div>
-        <div className="mt-3 flex justify-between font-mono text-[10px] tracking-[0.3em] text-muted uppercase">
-          <span>Booting</span>
-          <span className="text-accent">{String(Math.round(pct)).padStart(3, "0")}%</span>
-        </div>
+        <p className="font-mono text-[10px] tracking-[0.32em] text-muted uppercase" aria-live="polite">
+          <span className="text-accent">&gt;</span> <span id="ld-status" suppressHydrationWarning>{LOADER_STEPS[0][1]}</span>
+          <span className="ld-caret ml-0.5 animate-pulse">_</span>
+        </p>
       </div>
+      <script dangerouslySetInnerHTML={{ __html: loaderScript(modelBytes) }} />
     </div>
   );
 }
@@ -86,7 +150,7 @@ function AboutContent() {
   );
 }
 
-export default function Experience() {
+export default function Experience({ modelBytes }: { modelBytes: number }) {
   const reduced = useMediaQuery(REDUCED_MOTION);
   const touch = useMediaQuery(TOUCH);
   const small = useMediaQuery("(max-width: 767px)");
@@ -100,9 +164,17 @@ export default function Experience() {
   const hero = useRef<HTMLDivElement>(null);
   const aboutPanel = useRef<HTMLDivElement>(null);
   const screen = useRef<HTMLDivElement>(null);
+  const glint = useRef<HTMLDivElement>(null);
+  const glass = useRef<HTMLDivElement>(null);
+  const pixels = useRef<HTMLDivElement>(null);
 
   const onReady = useCallback(() => setReady(true), []);
-  const onProgress = useCallback((n: number) => setPct(n), []);
+  const onProgress = useCallback((n: number) => setPct((p) => Math.max(p, Math.min(n, 99))), []);
+
+  // the inline loader script tracks the download; the loading manager and "scene ready" top it up
+  useEffect(() => {
+    (window as unknown as { __setLoad?: (p: number) => void }).__setLoad?.(ready ? 100 : pct);
+  }, [pct, ready]);
 
   // start at the top with scrolling locked until the intro has played
   useEffect(() => {
@@ -200,10 +272,31 @@ export default function Experience() {
         aboutPanel.current.style.visibility = a > 0.01 ? "visible" : "hidden";
       }
       // the DOM copy of the laptop screen takes over once the camera has squared up to it
+      // ...passing through the glass on the way: a reflection sweeps over it, then the sub-pixels show and the image
+      // splits into colour fringes, then the page comes into focus (exactly aligned once settled)
+      const g = story.act === 1 ? throughGlass(p) : { glint: 1, glintOn: 0, pixels: 0, settle: 1 };
+      story.fringe = g.pixels;
       if (screen.current) {
         const o = smooth(0.935, 0.975, p) * (story.act === 2 ? 1 : smooth(0.9, 1, story.lock)); // act 2 begins as it scrolls away
         screen.current.style.opacity = String(o);
         screen.current.style.visibility = o > 0.001 ? "visible" : "hidden";
+        const u = 1 - g.settle;
+        screen.current.style.transform = u > 0.001 ? `scale(${1 + 0.06 * u})` : "";
+        screen.current.style.filter = u > 0.001 ? `blur(${(7 * u).toFixed(2)}px) saturate(${1 + 0.4 * u})` : "";
+      }
+      // the reflection and sub-pixels live on the glass: clip them to the screen's outline on the page
+      if (glass.current && (g.glintOn > 0 || g.pixels > 0)) {
+        const q = story.screenQuad;
+        glass.current.style.clipPath = `polygon(${q[0]}px ${q[1]}px, ${q[2]}px ${q[3]}px, ${q[4]}px ${q[5]}px, ${q[6]}px ${q[7]}px)`;
+      }
+      if (glint.current) {
+        glint.current.style.opacity = String(g.glintOn);
+        glint.current.style.transform = `translateX(${(-60 + 170 * g.glint).toFixed(1)}%) skewX(-18deg)`;
+      }
+      if (pixels.current) {
+        pixels.current.style.opacity = String(0.55 * g.pixels);
+        const cell = (3 + 15 * g.pixels).toFixed(1); // the sub-pixel grid grows as we get closer
+        pixels.current.style.backgroundSize = `${cell}px ${cell}px`;
       }
       // at the exact moment the Work section reaches the top, its live copy sits where this one is: switch to it
       const workEl = sec("work");
@@ -227,7 +320,7 @@ export default function Experience() {
   return (
     <>
       <div ref={loader} className="fixed inset-0 z-[70] grid place-items-center bg-background" role="status" aria-label="Loading">
-        <LaptopLoader pct={pct} />
+        <LaptopLoader modelBytes={modelBytes} />
       </div>
 
       <section id="home" ref={wrap} className="relative" style={{ height: reduced ? "100svh" : `${(STORY_SCROLL + 1) * 100}svh` }}>
@@ -288,7 +381,7 @@ export default function Experience() {
           {!reduced && (
             <div
               ref={aboutPanel}
-              className="invisible absolute inset-x-4 bottom-4 z-10 max-h-[46svh] overflow-y-auto rounded-3xl border border-white/10 bg-background/80 p-5 opacity-0 backdrop-blur-md md:inset-x-auto md:top-1/2 md:right-[5vw] md:bottom-auto md:max-h-none md:w-[min(520px,42vw)] md:-translate-y-1/2 md:overflow-visible md:border-0 md:bg-transparent md:p-0 md:backdrop-blur-none"
+              className="invisible absolute inset-x-4 bottom-4 z-10 max-h-[46svh] overflow-y-auto rounded-3xl border border-white/10 bg-background/95 p-5 opacity-0 md:inset-x-auto md:top-1/2 md:right-[5vw] md:bottom-auto md:max-h-none md:w-[min(520px,42vw)] md:-translate-y-1/2 md:overflow-visible md:border-0 md:bg-transparent md:p-0"
             >
               <AboutContent />
             </div>
@@ -296,6 +389,14 @@ export default function Experience() {
 
           {/* the dive ends inside the laptop: this DOM copy of its screen replaces the 3D one, then scrolls on into Work */}
           {!reduced && <LaptopBrowser ref={screen} className="invisible absolute inset-0 z-20 opacity-0" />}
+          {/* through the glass: a reflection sweeping over the screen, then its RGB sub-pixels up close */}
+          {!reduced && (
+            <div ref={glass} aria-hidden className="pointer-events-none absolute inset-0 z-30 overflow-hidden" style={{ clipPath: "inset(50%)" }}>
+              <div ref={glint} className="absolute inset-y-[-20%] left-0 w-[45%] opacity-0"
+                style={{ background: "linear-gradient(90deg, transparent, rgb(255 255 255 / 0.05) 30%, rgb(255 255 255 / 0.22) 50%, rgb(255 255 255 / 0.05) 70%, transparent)" }} />
+              <div ref={pixels} className="subpixels absolute inset-0 opacity-0" />
+            </div>
+          )}
         </div>
 
         {/* nav anchor for the About beat inside the pinned story */}

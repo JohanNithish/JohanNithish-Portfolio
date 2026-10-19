@@ -31,14 +31,19 @@ export const story = {
   act2Enabled: true,
   /** 0..1 the camera squares up to the laptop screen at the end of the dive */
   lock: 0,
+  /** 0..1 colour fringing while we pass through the screen glass */
+  fringe: 0,
+  /** the laptop screen's corners on the page (tl, tr, br, bl as x, y pairs in CSS px), written by the scene */
+  screenQuad: [0, 0, 0, 0, 0, 0, 0, 0] as number[],
 };
 
 /** Act 2 choreography. x = where he stands (scene units, + is screen right), yaw = which way he faces
  *  (0 = camera, + turns him toward screen right), type = laptop open in one hand, typing with the other,
- *  lid = laptop open, point = pointing down the timeline (the sweep follows the scroll), call = "call me" at his ear.
+ *  lid = laptop open, point = pointing down the timeline (the sweep follows the scroll), call = holding the open
+ *  laptop out to you (Contact).
  *  He walks whenever x changes.
  *  Services: walks in and types, his tools pour out · Resume: walks across, points you down the timeline ·
- *  Contact: "call me", while paper planes fly out to the contact form. */
+ *  Contact: shows you the laptop, where a chat writes itself and "sends" paper planes into the contact form. */
 export type Act2Pose = { x: number; yaw: number; type: number; lid: number; point: number; call: number };
 const WALK_RIGHT = Math.PI / 2;
 const P = (x: number, yaw: number, type = 0, lid = 0, point = 0, call = 0): Act2Pose => ({ x, yaw, type, lid, point, call });
@@ -53,8 +58,8 @@ const ACT2: [number, Act2Pose][] = [
   [1.82, P(1.55, WALK_RIGHT)], //             arrives beside Resume
   [1.92, P(1.55, -0.62, 0, 0, 1)], //         turns to the timeline and points along it
   [2.5, P(1.55, -0.62, 0, 0, 1)],
-  [2.66, P(1.55, -0.18, 0, 0, 0, 1)], //      Contact: "call me"
-  [3.0, P(1.55, -0.18, 0, 0, 0, 1)],
+  [2.66, P(1.55, -0.22, 0, 1, 0, 1)], //      Contact: holds the open laptop out to you; its chat sends planes
+  [3.0, P(1.55, -0.22, 0, 1, 0, 1)],
 ];
 /** how far down the timeline he is pointing, 0 (top) .. 1 (bottom), as you scroll through Resume */
 export const pointSweep = (a: number) => clamp01((a - 1.9) / 0.6);
@@ -93,6 +98,16 @@ export function storyFrame(p: number) {
 
 /** fired on window when one of his paper planes lands on the Send button, so it can pulse */
 export const PLANE_LANDED = "paper-plane-landed";
+
+/** Passing through the laptop screen at the end of the dive (story progress p):
+ *  glint = a reflection sweeping across the glass, 0..1 position · pixels = so close the RGB sub-pixels show and the
+ *  image splits into colour fringes · settle = the HTML page coming into focus. All 0 outside the dive. */
+export function throughGlass(p: number) {
+  const glint = smooth(0.84, 0.935, p);
+  const pixels = smooth(0.905, 0.945, p) * (1 - smooth(0.952, 0.985, p));
+  const settle = smooth(0.94, 0.985, p);
+  return { glint, glintOn: smooth(0.84, 0.87, p) * (1 - smooth(0.915, 0.94, p)), pixels, settle };
+}
 
 export function clamp01(x: number) { return Math.min(1, Math.max(0, x)); }
 export const smooth = (a: number, b: number, x: number) => {

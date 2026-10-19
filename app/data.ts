@@ -17,14 +17,14 @@ export const profile = {
 };
 
 export const stats = [
-  { value: "25+", label: "Real-world projects" },
-  { value: "2 yrs", label: "Practical experience" },
+  { value: "30+", label: "Real-world projects" },
+  { value: "3+ yrs", label: "Practical experience" },
 ];
 
 export const about = {
   title: "Turning ideas into working software",
   body:
-    "Hey there! I'm Johan Nithish, a full-stack developer and software engineer with 2 years of hands-on experience building digital solutions. Over the past two years I've delivered 25+ projects, from dynamic websites to scalable software applications.",
+    "Hey there! I'm Johan Nithish, a full-stack developer and software engineer with 3+ years of hands-on experience building digital solutions. Over the past three years I've delivered 30+ projects, from dynamic websites to scalable software applications.",
   points: [
     {
       title: "Work & Approach",
@@ -66,6 +66,7 @@ export const education = [
 
 export const experience = [
   { title: "Mist Solutions", period: "2 years · Intern", body: "Hands-on experience in full-stack development, software engineering, and problem-solving." },
+  { title: "TCP International Inc", period: "Present · Product-based company", body: "Building and shipping features for the company's own software products, working across the full stack in a product-based team." },
 ];
 
 export const nav = [

@@ -8,6 +8,7 @@ import { socialIcon } from "./Icons";
 export default function Nav() {
   const [active, setActive] = useState("#home");
   const [open, setOpen] = useState(false);
+  const [stuck, setStuck] = useState(false);
   const bar = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -23,6 +24,7 @@ export default function Nav() {
         if (el && el.getBoundingClientRect().top < innerHeight * 0.35) current = n.href;
       }
       setActive(current);
+      setStuck(scrollY > 24);
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
     update();
@@ -33,7 +35,7 @@ export default function Nav() {
 
   return (
     <header className="after-intro fixed inset-x-0 top-0 z-50 px-3 pt-3 sm:px-6 sm:pt-4">
-      <nav className="glass mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 rounded-full pr-2 pl-5" aria-label="Main">
+      <nav data-stuck={stuck ? "" : undefined} className="nav-bar mx-auto flex h-14 max-w-6xl items-center justify-between gap-4 rounded-full pr-2 pl-5" aria-label="Main">
         <a href="#home" className="font-mono text-[15px] font-semibold tracking-tight" onClick={() => setOpen(false)}>
           <span className="text-accent">&lt;</span>JN<span className="text-accent">/&gt;</span>
         </a>
@@ -72,7 +74,7 @@ export default function Nav() {
       </nav>
 
       {/* phone menu sheet */}
-      <div className={`glass mx-auto mt-2 max-w-6xl overflow-hidden rounded-3xl transition-all duration-500 md:hidden ${open ? "max-h-96 opacity-100" : "pointer-events-none max-h-0 opacity-0"}`}>
+      <div className={`glass mx-auto mt-2 max-w-6xl bg-background/95 overflow-hidden rounded-3xl transition-all duration-500 md:hidden ${open ? "max-h-96 opacity-100" : "pointer-events-none max-h-0 opacity-0"}`}>
         <ul className="flex flex-col p-3">
           {nav.map((n) => (
             <li key={n.href}>

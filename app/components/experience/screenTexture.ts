@@ -10,8 +10,8 @@ const CODE: Token[][] = [
   [["export const", "#c084fc"], [" johan", "#7dd3fc"], [" = ", "#e2e8f0"], ["new", "#c084fc"], [" Developer", "#fde68a"], ["({", "#e2e8f0"]],
   [["  name", "#7dd3fc"], [": ", "#e2e8f0"], [`"${profile.name}"`, "#86efac"], [",", "#e2e8f0"]],
   [["  role", "#7dd3fc"], [": ", "#e2e8f0"], ['"Full-Stack Developer"', "#86efac"], [",", "#e2e8f0"]],
-  [["  experience", "#7dd3fc"], [": ", "#e2e8f0"], ['"2 years"', "#86efac"], [",", "#e2e8f0"]],
-  [["  projects", "#7dd3fc"], [": ", "#e2e8f0"], ["25", "#fca5a5"], [",", "#e2e8f0"]],
+  [["  experience", "#7dd3fc"], [": ", "#e2e8f0"], ['"3+ years"', "#86efac"], [",", "#e2e8f0"]],
+  [["  projects", "#7dd3fc"], [": ", "#e2e8f0"], ["30", "#fca5a5"], [",", "#e2e8f0"]],
   [["  stack", "#7dd3fc"], [": [", "#e2e8f0"], ['"React"', "#86efac"], [", ", "#e2e8f0"], ['"Node"', "#86efac"], [", ", "#e2e8f0"], ['"MySQL"', "#86efac"], ["],", "#e2e8f0"]],
   [["})", "#e2e8f0"]],
   [],
@@ -40,7 +40,7 @@ export function createScreen() {
     return img;
   });
 
-  let mode: "code" | "work" = "code";
+  let mode: "code" | "work" | "contact" = "code";
   let lastDraw = -1;
 
   function drawCode(t: number) {
@@ -120,14 +120,82 @@ export function createScreen() {
     });
   }
 
-  /** redraws at most ~12 times a second */
-  function update(t: number, workMode: boolean) {
-    const next = workMode ? "work" : "code";
-    if (next === mode && next === "work" && lastDraw >= 0 && t - lastDraw < 0.5) return;
-    if (next === mode && t - lastDraw < 0.08) return;
+  // ---------------------------------------------------------------- contact: a chat that writes itself
+  // Drawn big and graphic, because the camera sees it from a few metres away. One cycle: his bubble pops up, a reply
+  // types itself, the send button flashes and the message flies off the screen as a paper plane (update() -> true).
+  const CHAT = { cycle: 4.8, hello: "Got a project?", reply: "Let's talk!", send: 2.7 };
+  let chatStart = -1, lastPhase = 0;
+  function bubble(x: number, y: number, w: number, h: number, fill: string, tailLeft: boolean) {
+    ctx.fillStyle = fill; roundRect(ctx, x, y, w, h, 34); ctx.fill();
+    ctx.beginPath();
+    if (tailLeft) { ctx.moveTo(x + 18, y + h - 22); ctx.lineTo(x - 14, y + h + 6); ctx.lineTo(x + 52, y + h - 6); }
+    else { ctx.moveTo(x + w - 18, y + h - 22); ctx.lineTo(x + w + 14, y + h + 6); ctx.lineTo(x + w - 52, y + h - 6); }
+    ctx.fill();
+  }
+  function drawContact(t: number) {
+    const display = fam("--font-display", "system-ui"), body = fam("--font-body", "system-ui");
+    if (chatStart < 0) chatStart = t;
+    const c = (t - chatStart) % CHAT.cycle;
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, "#0e1a2e"); g.addColorStop(1, BG);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    // header: avatar, name, online dot
+    ctx.fillStyle = "#0f1a2c"; ctx.fillRect(0, 0, W, 96);
+    ctx.fillStyle = "#22d3ee"; ctx.beginPath(); ctx.arc(70, 48, 30, 0, Math.PI * 2); ctx.fill();
+    text("JN", 70 - 20, 48 - 15, `800 30px ${display}`, "#0b1220");
+    text("Johan", 120, 22, `700 30px ${display}`, "#eef3f8");
+    ctx.fillStyle = "#34d399"; ctx.beginPath(); ctx.arc(128, 70, 7, 0, Math.PI * 2); ctx.fill();
+    text("online · replies fast", 144, 60, `20px ${body}`, "#94a3b8");
+    // his bubble pops in
+    const pop = Math.min(1, c / 0.35), sc = pop < 1 ? 1.18 * pop - 0.18 * pop * pop * pop : 1;
+    ctx.save(); ctx.translate(60, 150); ctx.scale(sc, sc);
+    ctx.font = `700 58px ${body}`; const hw = ctx.measureText(CHAT.hello).width + 34 * 2 + 74;
+    bubble(0, 0, hw, 112, "#1e293b", true);
+    text("👋", 30, 24, `58px ${body}`, "#fff");
+    text(CHAT.hello, 34 + 74, 26, `700 58px ${body}`, "#eef3f8");
+    ctx.restore();
+    // the reply types itself into the input, then becomes a bubble once sent
+    const typed = c < 0.7 ? 0 : Math.min(CHAT.reply.length, Math.floor((c - 0.7) / (CHAT.send - 0.9) * CHAT.reply.length));
+    const sent = c >= CHAT.send;
+    if (sent) {
+      const k = Math.min(1, (c - CHAT.send) / 0.3);
+      ctx.font = `700 58px ${body}`; const rw = ctx.measureText(CHAT.reply).width + 68;
+      ctx.save(); ctx.globalAlpha = k; ctx.translate(0, (1 - k) * 60);
+      bubble(W - 60 - rw, 300, rw, 112, "#22d3ee", false);
+      text(CHAT.reply, W - 60 - rw + 34, 300 + 26, `700 58px ${body}`, "#0b1220");
+      text("✓✓ sent", W - 60 - 150, 426, `26px ${body}`, "#67e8f9");
+      ctx.restore();
+    }
+    // input + send button
+    ctx.fillStyle = "#111c30"; roundRect(ctx, 40, H - 132, W - 220, 92, 46); ctx.fill();
+    const shown = sent ? "" : CHAT.reply.slice(0, typed);
+    text(shown || (sent ? "Write to me…" : ""), 84, H - 108, `700 52px ${body}`, shown ? "#eef3f8" : "#475569");
+    if (!sent && Math.floor(t * 2.5) % 2 === 0) {
+      ctx.font = `700 52px ${body}`; const cx = 84 + ctx.measureText(shown).width + 4;
+      ctx.fillStyle = "#22d3ee"; ctx.fillRect(cx, H - 110, 4, 46);
+    }
+    const flash = Math.max(0, 1 - Math.abs(c - CHAT.send) / 0.25);
+    const ready = typed >= CHAT.reply.length || sent;
+    ctx.fillStyle = flash > 0 ? `rgba(165,243,252,${0.6 + 0.4 * flash})` : ready ? "#22d3ee" : "#164e63";
+    ctx.beginPath(); ctx.arc(W - 110, H - 86, 54 + 10 * flash, 0, Math.PI * 2); ctx.fill();
+    // a paper plane glyph on the button
+    ctx.save(); ctx.translate(W - 110, H - 86); ctx.rotate(-0.35); ctx.fillStyle = "#0b1220";
+    ctx.beginPath(); ctx.moveTo(-26, -2); ctx.lineTo(28, -18); ctx.lineTo(-6, 22); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    const fired = lastPhase < CHAT.send && c >= CHAT.send;
+    lastPhase = c;
+    return fired;
+  }
+
+  /** redraws at most ~12 times a second (the chat at ~25). Returns true the moment the chat sends a message. */
+  function update(t: number, next: "code" | "work" | "contact") {
+    if (next !== "contact") chatStart = -1;
+    if (next === mode && next === "work" && lastDraw >= 0 && t - lastDraw < 0.5) return false;
+    if (next === mode && t - lastDraw < (next === "contact" ? 0.04 : 0.08)) return false;
     mode = next; lastDraw = t;
-    if (mode === "code") drawCode(t); else drawWork();
+    let fired = false;
+    if (mode === "code") drawCode(t); else if (mode === "work") drawWork(); else fired = drawContact(t);
     texture.needsUpdate = true;
+    return fired;
   }
 
   drawCode(0);

@@ -1,3 +1,5 @@
+import { statSync } from "node:fs";
+import { join } from "node:path";
 import { preload } from "react-dom";
 import ContactForm from "./components/ContactForm";
 import Experience from "./components/experience/Experience";
@@ -38,7 +40,7 @@ function Socials({ vertical = false }: { vertical?: boolean }) {
 function Marquee({ words }: { words: string[] }) {
   const row = [...words, ...words];
   return (
-    <div aria-hidden className="relative overflow-hidden border-y border-white/[0.06] bg-background/60 py-6 backdrop-blur-sm">
+    <div aria-hidden className="relative overflow-hidden border-y border-white/[0.06] bg-background/80 py-6">
       <div className="marquee">
         {[0, 1].map((k) => (
           <div key={k} className="flex shrink-0 items-center">
@@ -55,9 +57,12 @@ function Marquee({ words }: { words: string[] }) {
   );
 }
 
+// the model's size, for the loader's progress (the server gzips it, so the response has no Content-Length)
+const MODEL_BYTES = statSync(join(process.cwd(), "public", "models", "hero.glb")).size;
+
 export default function Home() {
   // start downloading the 3D scene with the HTML, before any JavaScript runs
-  preload("/models/hero.glb", { as: "fetch", crossOrigin: "anonymous" });
+  // (the model itself is fetched by the loader's inline script, which streams it so the progress is real)
   preload("/draco/draco_wasm_wrapper.js", { as: "fetch", crossOrigin: "anonymous" });
   preload("/draco/draco_decoder.wasm", { as: "fetch", crossOrigin: "anonymous" });
   return (
@@ -71,7 +76,7 @@ export default function Home() {
 
       <main className="flex-1">
         {/* hero -> about -> dive into the laptop: the pinned 3D story */}
-        <Experience />
+        <Experience modelBytes={MODEL_BYTES} />
 
         {/* ---------- work: we are inside the laptop now ----------
             Pulled up one screen so it starts exactly under the story's last frame (the static copy of the laptop
@@ -143,7 +148,8 @@ export default function Home() {
               <div aria-hidden className="absolute -top-32 -right-32 h-80 w-80 rounded-full bg-accent/20 blur-3xl" />
               <div aria-hidden className="absolute -bottom-40 -left-24 h-80 w-80 rounded-full bg-accent-3/10 blur-3xl" />
               <Eyebrow n="05">Get in touch</Eyebrow>
-              <h2 data-split className="mt-5 text-4xl font-bold sm:text-5xl">Let&apos;s build something <span className="grad-text">great</span></h2>
+              {/* no data-split here: SplitText would pull "great" out of its gradient span (the panel has its own reveal) */}
+              <h2 className="mt-5 text-4xl font-bold sm:text-5xl">Let&apos;s build something <span className="grad-text">great</span></h2>
               <p className="mt-4 max-w-xl text-muted">Have a project or role in mind? My inbox is always open.</p>
               <div className="mt-8 grid gap-3 sm:grid-cols-3">
                 <a href={`mailto:${profile.email}`} className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/10 p-4 transition hover:border-accent/50">

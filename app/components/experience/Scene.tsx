@@ -3,9 +3,9 @@
 
 import { useFrame, useThree } from "@react-three/fiber";
 import { ContactShadows, Environment, Lightformer, useGLTF } from "@react-three/drei";
-import { Bloom, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
-import type { BloomEffect, DepthOfFieldEffect, VignetteEffect } from "postprocessing";
-import { useEffect, useRef } from "react";
+import { Bloom, ChromaticAberration, DepthOfField, EffectComposer, Noise, Vignette } from "@react-three/postprocessing";
+import type { BloomEffect, ChromaticAberrationEffect, DepthOfFieldEffect, VignetteEffect } from "postprocessing";
+import { use, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import type { GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
@@ -18,6 +18,13 @@ import { act2Pose, type Act2Pose, pointSweep, SCREEN_SWAP, smooth, story, storyF
 RectAreaLightUniformsLib.init();
 
 export const MODEL_URL = "/models/hero.glb";
+
+/** the loader's inline script already downloaded the model (with real progress): use its blob URL, else fetch it */
+const modelUrl: Promise<string> | null = typeof window === "undefined" ? null
+  : ((window as unknown as { __model?: Promise<string | null> }).__model ?? Promise.resolve(null)).then((u) => u ?? MODEL_URL);
+function useModelUrl() {
+  return modelUrl ? use(modelUrl) : MODEL_URL;
+}
 const FPS = 24;
 const DEG = Math.PI / 180;
 const BASE_FOV = 30;
@@ -187,6 +194,7 @@ function buildRig(gltf: GLTF) {
     walk: { phase: 0, lastX: -3.8, weight: 0 },
     pose: { x: -3.8, yaw: Math.PI / 2, type: 0, lid: 0, point: 0, call: 0 } as Act2Pose,
     lastLid: 0,
+    showChat: false,
   };
 }
 
@@ -204,7 +212,7 @@ function rotateWorld(bone: THREE.Object3D, clean: THREE.Quaternion, world: THREE
 const focusPoint = new THREE.Vector3(0, 1.3, 0);
 
 function Character({ tracking, onReady }: { tracking: boolean; onReady: () => void }) {
-  const gltf = useGLTF(MODEL_URL, "/draco/") as unknown as GLTF;
+  const gltf = useGLTF(useModelUrl(), "/draco/") as unknown as GLTF;
   const rig = useRef<Rig | null>(null);
   const floor = useRef<THREE.Group>(null);
   const setFrameloop = useThree((s) => s.setFrameloop);
@@ -260,8 +268,9 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
       for (const a of [r.walkA, r.callA, r.carryA, r.typeA, r.pointA]) a.setEffectiveWeight(0);
       lidOpen = story.lid / 2.5;
       fountain.rate = 0; r.lastLid = 0;
-      planes.active = false;
-      typing = story.typing * (1 - smooth(0.55, 0.6, p));
+      planes.active = false; r.showChat = false;
+      // the taps stop the moment the right hand starts to leave the keys (story frame ~101, p = 0.41)
+      typing = story.typing * (1 - smooth(0.395, 0.413, p));
       r.storyRFA.setEffectiveWeight((1 - handOver) * (1 - typing));
       screenOn = story.power;
       faceLit = 1 - smooth(0.58, 0.7, p);
@@ -282,7 +291,8 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
       const typeW = pose.type * (1 - w);
       const pointW = pose.point * (1 - w), callW = pose.call * (1 - w);
       r.pointA.time = pointSweep(story.act2) * r.pointA.getClip().duration;
-      planes.active = story.act2Enabled && callW > 0.6;
+      planes.active = story.act2Enabled && callW > 0.6 && pose.lid > 0.8;
+      r.showChat = callW > 0.5;
       r.storyA.setEffectiveWeight(0);
       r.storyRA.setEffectiveWeight(0);
       r.storyRFA.setEffectiveWeight(0);
@@ -297,8 +307,8 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
       if (pose.lid > 0.75 && r.lastLid <= 0.75 && story.act2Target < 1.6) fountain.burst = 9;
       r.lastLid = pose.lid;
       fountain.rate = story.act2Enabled && story.act2 < 1.6 ? typeW * smooth(0.8, 1, pose.lid) : 0;
-      fountain.lean = pose.x < 0 ? -1.3 : 1.3; // spray away from the text column (and off his face)
-      typing = typeW;
+      fountain.lean = pose.x < 0 ? -1 : 1; // which way is away from the text column
+      typing = smooth(0.85, 1, typeW); // taps only while the hand is actually on the keys, not while it moves
       screenOn = pose.lid;
       faceLit = pose.lid * 0.6;
     }
@@ -361,6 +371,9 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
     } else {
       v1.set(0, 1.05, 5.8);
       v2.set(0, 0.95, 0);
+      // Contact: the camera eases in so you can read the chat on his laptop (he stays clear of the form on the left)
+      const ci = story.act2Enabled ? smooth(2.5, 2.75, story.act2) : 0;
+      if (ci > 0) { v1.lerp(v10.set(0.6, 1.12, 4.25), ci); v2.lerp(v9.set(0.6, 0.97, 0), ci); }
     }
     // end of the dive: square up to the screen so it covers the viewport exactly as ScreenBlock (the DOM copy) does,
     // then the page cross-fades to that copy and simply keeps scrolling
@@ -388,16 +401,28 @@ function Character({ tracking, onReady }: { tracking: boolean; onReady: () => vo
     }
     cam.position.copy(v1);
     cam.lookAt(v2);
+    // where the laptop screen is on the page (its 4 corners, CSS px), so the glass reflection can be clipped to it
+    cam.updateMatrixWorld();
+    {
+      const c = r.screenCorners, M = r.screenMesh.matrixWorld, q = story.screenQuad;
+      [c.tl, c.tr, c.br, c.bl].forEach((corner, i) => {
+        v5.copy(corner).applyMatrix4(M).project(cam);
+        q[i * 2] = (v5.x * 0.5 + 0.5) * state.size.width;
+        q[i * 2 + 1] = (0.5 - v5.y * 0.5) * state.size.height;
+      });
+    }
 
     // ---- screen: content, power flicker, and the light it throws on the face
-    r.screen.update(t, !act2 && p > SCREEN_SWAP);
+    // the screen: code while he types, the work grid after the turn, a chat while he shows it to you in Contact
+    const screenMode = act2 ? (r.showChat ? "contact" : "code") : p > SCREEN_SWAP ? "work" : "code";
+    if (r.screen.update(t, screenMode) && planes.active) planes.launch = true;
     const power = screenOn * (1 - (1 - story.lock) * (0.03 - 0.03 * Math.sin(t * 50))); // faint refresh shimmer, gone once locked
     r.screenMat.color.setScalar(power);
     r.screenMesh.localToWorld(v1.copy(r.screenCenterLocal));
     v3.copy(r.screenNormalLocal).transformDirection(r.screenMesh.matrixWorld);
     r.faceLight.position.copy(v1).addScaledVector(v3, 0.02);
     fountain.origin.copy(v1).addScaledVector(v3, 0.06).y += 0.12;
-    r.handR.getWorldPosition(planes.origin);
+    planes.origin.copy(v1).addScaledVector(v3, 0.05); // out of the screen
     r.faceLight.lookAt(v4.copy(v1).add(v3));
     r.faceLight.intensity = 9 * power * faceLit;
 
@@ -466,7 +491,13 @@ function Effects({ dof }: { dof: boolean }) {
   const dofRef = useRef<DepthOfFieldEffect>(null);
   const bloomRef = useRef<BloomEffect>(null);
   const vigRef = useRef<VignetteEffect>(null);
+  const caRef = useRef<ChromaticAberrationEffect>(null);
+  const caOffset = useMemo(() => new THREE.Vector2(0, 0), []);
   useFrame((state) => {
+    // passing through the glass: the image splits into colour fringes for a moment
+    const f = story.fringe;
+    caOffset.set(0.006 * f, 0.0035 * f);
+    if (caRef.current) caRef.current.offset.copy(caOffset);
     // bloom + vignette fade out as the camera locks onto the screen, so it matches the flat DOM copy
     const k = 1 - story.lock;
     if (bloomRef.current) bloomRef.current.intensity = 0.9 * k;
@@ -480,7 +511,9 @@ function Effects({ dof }: { dof: boolean }) {
     return (
       <EffectComposer multisampling={0}>
         <Bloom ref={bloomRef} intensity={0.9} luminanceThreshold={0.55} luminanceSmoothing={0.2} mipmapBlur />
-        <Vignette ref={vigRef} offset={0.25} darkness={0.8} />
+        <ChromaticAberration ref={caRef} offset={caOffset} radialModulation modulationOffset={0.15} />
+        <ChromaticAberration ref={caRef} offset={caOffset} radialModulation modulationOffset={0.15} />
+      <Vignette ref={vigRef} offset={0.25} darkness={0.8} />
         <Noise opacity={0.025} premultiply />
       </EffectComposer>
     );
@@ -489,6 +522,7 @@ function Effects({ dof }: { dof: boolean }) {
     <EffectComposer multisampling={0}>
       <DepthOfField ref={dofRef} target={[0, 1.3, 0]} worldFocusRange={0.35} bokehScale={5} />
       <Bloom ref={bloomRef} intensity={0.9} luminanceThreshold={0.55} luminanceSmoothing={0.2} mipmapBlur />
+      <ChromaticAberration ref={caRef} offset={caOffset} radialModulation modulationOffset={0.15} />
       <Vignette ref={vigRef} offset={0.25} darkness={0.8} />
       <Noise opacity={0.025} premultiply />
     </EffectComposer>
@@ -508,4 +542,3 @@ export function SceneContents({ tracking, dof, onReady }: { tracking: boolean; d
 /** test builds only: `?nofx` renders without postprocessing */
 const NO_FX = process.env.NEXT_PUBLIC_SHOTS === "1" && typeof window !== "undefined" && new URLSearchParams(window.location.search).has("nofx");
 
-useGLTF.preload(MODEL_URL, "/draco/");

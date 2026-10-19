@@ -17,10 +17,13 @@ export const fountain = {
   lean: 0,
 };
 
-const MAX = 48;
-const LIFE = 2.9;
-const GRAVITY = 4.2;
-const SIZE = 0.13;
+const MAX = 140;
+const LIFE = 3.1;
+const GRAVITY = 3.9;
+const SIZE = 0.12;
+const FLOW = 15; // tiles a second at full pour
+const DRAG = 0.35; // a little air resistance: soft, floaty arcs
+const STEP = 1 / 120; // fixed physics step, so motion is identical at any frame rate
 
 type Icon = { path: string; hex: string };
 const GLYPHS = ["</>", "{ }", "☕"]; // a few fun extras between the logos
@@ -56,11 +59,11 @@ function tileTexture(icon: Icon | null, glyph?: string) {
   return t;
 }
 
-type P = { alive: boolean; age: number; pos: THREE.Vector3; vel: THREE.Vector3; spin: number; rot: number; bounced: boolean; size: number; tex: number };
+type P = { alive: boolean; age: number; pos: THREE.Vector3; vel: THREE.Vector3; spin: number; rot: number; landed: number; size: number; tex: number };
 
 /**
- * Developer tools pouring out of the laptop like a fountain: they arc up, tumble, bounce once on the floor with a
- * squash and pop away. Pooled sprites, no allocation per frame.
+ * Developer tools pouring out of the laptop like a fountain: a steady column that opens out all around him, tumbles
+ * lazily, lands with a soft bounce and fades. Pooled sprites, fixed-step physics, no allocation per frame.
  */
 export default function ToolFountain() {
   const textures = useMemo(() => {
@@ -73,58 +76,87 @@ export default function ToolFountain() {
     const s = new THREE.Sprite(m); s.visible = false; return s;
   }), [textures]);
   const parts = useMemo<P[]>(() => Array.from({ length: MAX }, () => ({
-    alive: false, age: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3(), spin: 0, rot: 0, bounced: false, size: SIZE, tex: 0,
+    alive: false, age: 0, pos: new THREE.Vector3(), vel: new THREE.Vector3(), spin: 0, rot: 0, landed: -1, size: SIZE, tex: 0,
   })), []);
   const acc = useRef(0);
   const next = useRef(0);
+  const count = useRef(0);
+  const ring = useRef(0);
+  const flow = useRef(0); // eased pour rate
+  const surge = useRef(0); // short boost when the lid opens
+  const physics = useRef(0); // leftover time for the fixed-step integrator
 
-  const spawn = (strength = 1) => {
-    const i = parts.findIndex((p) => !p.alive);
+  /** integrate one particle by dt (fixed small steps keep the arcs smooth) */
+  const step = (p: P, dt: number) => {
+    p.age += dt;
+    p.vel.y -= GRAVITY * dt;
+    p.vel.multiplyScalar(1 - DRAG * dt);
+    p.pos.addScaledVector(p.vel, dt);
+    p.spin *= 1 - 0.4 * dt;
+    p.rot += p.spin * dt;
+    // land softly: one small bounce, then it slides to a stop and fades
+    if (p.pos.y < p.size * 0.5 && p.vel.y < 0) {
+      p.pos.y = p.size * 0.5;
+      if (p.landed < 0) { p.landed = p.age; p.vel.y *= -0.3; p.vel.x *= 0.55; p.vel.z *= 0.55; p.spin *= 0.4; }
+      else { p.vel.y = 0; p.vel.x *= 1 - 6 * dt; p.vel.z *= 1 - 6 * dt; }
+    }
+  };
+
+  /** start a tile; `lead` = how long ago (within this frame) it was due, so the stream stays evenly spaced */
+  const spawn = (lead: number) => {
+    let i = -1;
+    for (let k = 0; k < MAX; k++) { const j = (ring.current + k) % MAX; if (!parts[j].alive) { i = j; break; } }
     if (i < 0) return;
+    ring.current = (i + 1) % MAX;
     const p = parts[i];
-    p.alive = true; p.age = 0; p.bounced = false;
-    // launch from the side of the lid that faces away from the text, a little toward us, so tiles clear his face
-    p.pos.copy(fountain.origin).add(new THREE.Vector3(Math.sign(fountain.lean) * (0.2 + Math.random() * 0.08), -0.08, 0.16 + Math.random() * 0.08));
-    const up = (1.75 + Math.random() * 0.6) * strength;
-    // sprays out sideways (fountain.lean says which way is away from the text), clear of his face
-    p.vel.set(fountain.lean * (0.35 + Math.random() * 0.75), up, 0.2 + Math.random() * 0.3);
-    p.spin = (Math.random() - 0.5) * 2.6; p.rot = (Math.random() - 0.5) * 0.4; // a lazy tumble
+    p.alive = true; p.age = 0; p.landed = -1;
+    // a fountain: a column straight up out of the laptop that opens out in every direction (golden-angle spread, so
+    // consecutive tiles never bunch) and lands in a ring around him. Tiles heading for the text column are held back.
+    p.pos.copy(fountain.origin).add(new THREE.Vector3((Math.random() - 0.5) * 0.06, 0, 0.14)); // in front of his face
+    const az = (count.current++ * 2.39996) % (Math.PI * 2);
+    const out = 0.5 + Math.random() * 0.45;
+    let vx = Math.cos(az) * out;
+    const vz = Math.sin(az) * out * 0.8 + 0.32;
+    if (vx * fountain.lean < 0) vx *= 0.3; // lean points away from the text
+    p.vel.set(vx, 2.15 + Math.random() * 0.35, vz);
+    p.spin = (Math.random() - 0.5) * 2.2; p.rot = (Math.random() - 0.5) * 0.4;
     p.size = SIZE * (0.85 + Math.random() * 0.3);
     p.tex = next.current++ % textures.length;
     const m = sprites[i].material; m.map = textures[p.tex]; m.needsUpdate = true;
+    for (let t = lead; t > 1e-6; t -= STEP) step(p, Math.min(STEP, t));
   };
 
   useFrame((_, dtRaw) => {
-    const dt = Math.min(dtRaw, 1 / 30);
-    // pour
-    if (fountain.burst > 0) { for (let k = 0; k < fountain.burst; k++) spawn(1.15); fountain.burst = 0; }
-    acc.current += fountain.rate * 3.5 * dt; // a steady, unhurried stream while he types
-    while (acc.current >= 1) { spawn(); acc.current -= 1; }
+    const dt = Math.min(dtRaw, 1 / 20);
+    // the pour eases in and out; opening the lid adds a short surge to the same stream (no clumpy bursts)
+    if (fountain.burst > 0) { surge.current = 1; fountain.burst = 0; }
+    surge.current = Math.max(0, surge.current - dt / 0.9);
+    flow.current += (fountain.rate - flow.current) * (1 - Math.exp(-4 * dt));
+    const rate = FLOW * (flow.current + 1.4 * surge.current * surge.current);
+    // spawn at the exact moment each tile is due within this frame
+    acc.current += rate * dt;
+    while (acc.current >= 1) { acc.current -= 1; spawn(rate > 0 ? acc.current / rate : 0); }
+
+    physics.current += dt;
+    let steps = 0;
+    while (physics.current >= STEP && steps < 12) { physics.current -= STEP; steps++; }
 
     for (let i = 0; i < MAX; i++) {
-      const p = parts[i], s = sprites[i];
-      if (!p.alive) { s.visible = false; continue; }
-      p.age += dt;
-      p.vel.y -= GRAVITY * dt;
-      p.pos.addScaledVector(p.vel, dt);
-      p.rot += p.spin * dt;
-      // one bouncy landing on the floor, then it pops
-      let squash = 1;
-      if (p.pos.y < p.size * 0.5 && p.vel.y < 0) {
-        if (!p.bounced) { p.bounced = true; p.pos.y = p.size * 0.5; p.vel.y *= -0.35; p.vel.x *= 0.6; p.vel.z *= 0.6; p.spin *= -0.5; p.age = Math.max(p.age, LIFE - 0.55); }
-        else p.age = LIFE;
-      }
-      if (p.bounced) squash = 1 + 0.14 * Math.exp(-(p.age - (LIFE - 0.55)) * 9);
-      if (p.age >= LIFE) { p.alive = false; s.visible = false; continue; }
-      // pop in, pop out
-      const t = p.age / LIFE;
-      const grow = Math.min(1, p.age / 0.18), out = t > 0.86 ? Math.max(0, 1 - (t - 0.86) / 0.14) : 1;
-      const k = p.size * easeOutBack(grow) * (out < 1 ? 1 + (1 - out) * 0.35 : 1) * (out > 0 ? 1 : 0);
-      s.visible = true;
-      s.position.copy(p.pos);
-      s.scale.set(k * squash, k / squash, 1);
-      s.material.rotation = p.rot;
-      s.material.opacity = out;
+      const p = parts[i], sp = sprites[i];
+      if (!p.alive) { sp.visible = false; continue; }
+      for (let k = 0; k < steps; k++) step(p, STEP);
+      const sinceLand = p.landed < 0 ? -1 : p.age - p.landed;
+      if (p.age >= LIFE || sinceLand > 0.75) { p.alive = false; sp.visible = false; continue; }
+      // smooth in, soft squash on landing, then shrink + fade
+      const grow = smooth01(p.age / 0.5); // tiny as they pass his face, full size as the fountain opens out
+      const squash = sinceLand >= 0 ? 1 + 0.12 * Math.exp(-sinceLand * 10) * Math.cos(sinceLand * 18) : 1;
+      const fade = sinceLand >= 0 ? 1 - smooth01((sinceLand - 0.3) / 0.45) : 1 - smooth01((p.age - (LIFE - 0.4)) / 0.4);
+      const k = p.size * grow * (0.6 + 0.4 * fade);
+      sp.visible = true;
+      sp.position.copy(p.pos);
+      sp.scale.set(k * squash, k / squash, 1);
+      sp.material.rotation = p.rot;
+      sp.material.opacity = fade;
     }
   });
 
@@ -135,7 +167,7 @@ export default function ToolFountain() {
   );
 }
 
-function easeOutBack(x: number) {
-  const c1 = 1.70158, c3 = c1 + 1;
-  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+function smooth01(x: number) {
+  const t = Math.min(1, Math.max(0, x));
+  return t * t * (3 - 2 * t);
 }
